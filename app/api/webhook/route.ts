@@ -7,8 +7,6 @@ import {
   isMessageProcessed,
   markMessageProcessed,
   saveMessage,
-  getAgentMode,
-  updateProfileName,
 } from "@/lib/supabase";
 import {
   detectCommand,
@@ -145,35 +143,14 @@ async function processWebhook(body: MetaWebhookPayload): Promise<void> {
     // ── Step 4: Mark as read (send read receipt) ─────────────
     await markAsRead(messageId);
 
-    // ── Step 5: Check agent mode and save profile name ───────
-    // Extract profile name if available and update it
-    const profileName = value.contacts?.[0]?.profile?.name;
-    if (profileName) {
-      await updateProfileName(from, profileName);
-    }
-
-    // Get the very latest agent mode
-    const agentMode = await getAgentMode(from);
-
-    // Save incoming message
-    await saveMessage(from, "user", messageText, "user");
-
-    if (agentMode === "human") {
-      console.log(`[webhook] Agent mode is 'human' for ${from}. Skipping AI.`);
-      return;
-    }
+    // ── Step 5: Save incoming message ────────────────────────
+    await saveMessage(from, "user", messageText);
 
     // ── Step 6: Check for active booking flow first ──────────
     const bookingResponse = await handleBookingFlow(from, messageText);
     if (bookingResponse) {
-      await saveMessage(from, "assistant", bookingResponse, "ai");
-      
-      // Split the response to make it bite-sized
-      const chunks = bookingResponse.split("\n\n").filter(chunk => chunk.trim().length > 0);
-      for (const chunk of chunks) {
-        await sendTextMessage(from, chunk);
-        await new Promise(resolve => setTimeout(resolve, 800)); // Small delay between messages
-      }
+      await saveMessage(from, "assistant", bookingResponse);
+      await sendTextMessage(from, bookingResponse);
       return;
     }
 
@@ -211,16 +188,12 @@ async function processWebhook(body: MetaWebhookPayload): Promise<void> {
     }
 
     // ── Step 9: Save AI/bot reply ────────────────────────────
-    await saveMessage(from, "assistant", reply, "ai", command ? "system" : undefined);
+    await saveMessage(from, "assistant", reply, command ? "system" : undefined);
 
-    // ── Step 10: Send reply via WhatsApp (Message Splitting) ─
-    const chunks = reply.split("\n\n").filter(chunk => chunk.trim().length > 0);
-    for (const chunk of chunks) {
-      await sendTextMessage(from, chunk);
-      await new Promise(resolve => setTimeout(resolve, 800)); // Small delay between messages
-    }
+    // ── Step 10: Send reply via WhatsApp ─────────────────────
+    await sendTextMessage(from, reply);
 
-    console.log(`[webhook] Reply sent to ${from} in ${chunks.length} chunks`);
+    console.log(`[webhook] Reply sent to ${from}`);
   } catch (error) {
     console.error(
       "[webhook] Processing error:",
